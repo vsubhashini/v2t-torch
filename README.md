@@ -1,2 +1,2 @@
 # v2t-private
-video2text models
+Video2Text torch models.
