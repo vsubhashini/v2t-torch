@@ -1,0 +1,5 @@
+# sample text
+Mean Pool model
+
+1. Encodes mean-pooled features from a video.
+2. Decodes to text.
