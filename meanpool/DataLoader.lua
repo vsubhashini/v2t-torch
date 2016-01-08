@@ -1,8 +1,8 @@
+local utils = require 'misc.utils'
 
 local DataLoader = torch.class('DataLoader')
 
-function DataLoader:__init(opt, utils)
-  self.utils = utils
+function DataLoader:__init(opt)
 
   local info = path.join(opt.save_dir, 'info.json')
   local trainBatches = path.join(opt.save_dir, 'train.t7')
@@ -13,7 +13,7 @@ function DataLoader:__init(opt, utils)
   if not path.exists(info) then
     prepro = true
   else
-    local curDataInfo = self.utils.read_json(info)
+    local curDataInfo = utils.read_json(info)
     if curDataInfo['batch_size'] ~= opt.batch_size or curDataInfo['max_seqlen'] ~= opt.max_seqlen then
       prepro = true
     end
@@ -28,7 +28,7 @@ function DataLoader:__init(opt, utils)
   end
 
   print('loading preprocessed files...')
-  local dataInfo = self.utils.read_json(info)
+  local dataInfo = utils.read_json(info)
 
   -- load vocabulary
   self.word_to_ix = dataInfo['word_to_ix']
@@ -53,7 +53,7 @@ function DataLoader:getBatch(split_ix)
   return self.splits[split_ix][batchId][1], self.splits[split_ix][batchId][2], self.splits[split_ix][batchId][3]
 end
 
-function DataLoader:vocabSize()
+function DataLoader:getVocabSize()
   return self.vocabSize
 end
 
@@ -103,8 +103,8 @@ function DataLoader:preprocess(label_files, video_files, vocab_file, save_dir, b
     print('processing labels and videos for ' .. splits[splitIx] .. '...')
     local vidlabelPairs = {} -- table that stores video-caption pairs 
     local ids = {} -- store video ids that correspond to entries in vidlabelPairs 
-    labelFile = io.open(label_files[splitIx])
-    vidFile = io.open(video_files[splitIx])
+    local labelFile = io.open(label_files[splitIx])
+    local vidFile = io.open(video_files[splitIx])
     local curVidId = ''
     local curVidTensor
     
@@ -125,7 +125,7 @@ function DataLoader:preprocess(label_files, video_files, vocab_file, save_dir, b
 
       if cap[1] ~= curVidId then
         rawdata2 = vidFile:read()
-        local convnetFeats = self.utils.split(rawdata2, ',')
+        local convnetFeats = utils.split(rawdata2, ',')
 
         assert(#convnetFeats == 4096)
 
@@ -180,7 +180,7 @@ function DataLoader:preprocess(label_files, video_files, vocab_file, save_dir, b
 
     torch.save(path.join(save_dir, splits[splitIx] .. '.t7'), batches)
     -- generate an extra valEval file
-    if splitIx==2 then
+    if splitIx == 2 then
       local valEval = {}
       local idDict = {}
       for s=1,#vidlabelPairs do
@@ -195,5 +195,5 @@ function DataLoader:preprocess(label_files, video_files, vocab_file, save_dir, b
   end
 
   out['splitSizes'] = splitSizes
-  self.utils.write_json(path.join(save_dir, 'info.json'), out)
+  utils.write_json(path.join(save_dir, 'info.json'), out)
 end
