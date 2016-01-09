@@ -65,7 +65,7 @@ function DataLoader:splitSize(split_ix)
 end
 
 function DataLoader:resetIterator(split_ix)
-  self.iterators[split_ix] = 0
+  self.iter[split_ix] = 0
 end
 
 function DataLoader:preprocess(label_files, video_files, vocab_file, save_dir, batch_size, max_seqlen)
