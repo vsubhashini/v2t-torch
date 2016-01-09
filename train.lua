@@ -211,8 +211,8 @@ while true do
   -- save checkpoint based on language evaluation
   if (iter % opt.eval_model_every == 0 or (epoch >= opt.epochs and opt.epochs > 0)) then
 
-  	local loss
-  	if opt.eval_val_loss > 0 then loss = evalSplit(2) end
+		local loss
+		if opt.eval_val_loss > 0 then loss = evalSplit(2) end
     local splitSamples, ids = sampleSplit(3)
     scores, samples = utils.lang_eval(splitSamples, ids)
 
