@@ -1,6 +1,20 @@
 local utils = require 'misc.utils'
 local net_utils = {}
 
+function net_utils.send_to_gpu(videos, labels)
+  if type(videos) == 'table' then
+    for i=1,#videos do
+      videos[i] = videos[i]:float():cuda()
+    end
+  else
+    videos = videos:float():cuda()
+  end
+
+  labels = labels:float():cuda()
+
+  return videos, labels
+end
+
 function net_utils.build_cnn(cnn, opt)
   local layer_num = utils.getopt(opt, 'layer_num', 38) -- 29
   local backend = utils.getopt(opt, 'backend', 'cudnn')
@@ -38,18 +52,7 @@ function net_utils.build_cnn(cnn, opt)
   return cnn_part
 end
 
-function net_utils.list_nngraph_modules(g)
-  local omg = {}
-  for i,node in ipairs(g.forwardnodes) do
-      local m = node.data.module
-      if m then
-        table.insert(omg, m)
-      end
-   end
-   return omg
-end
-
-function net_utils.prepro(imgs, data_augment, on_gpu)
+function net_utils.cnn_prepro(imgs, data_augment, on_gpu)
   assert(data_augment ~= nil, 'pass this in. careful here.')
   assert(on_gpu ~= nil, 'pass this in. careful here.')
 
@@ -84,6 +87,17 @@ function net_utils.prepro(imgs, data_augment, on_gpu)
   return imgs
 end
 
+function net_utils.list_nngraph_modules(g)
+  local omg = {}
+  for i,node in ipairs(g.forwardnodes) do
+      local m = node.data.module
+      if m then
+        table.insert(omg, m)
+      end
+   end
+   return omg
+end
+
 function net_utils.listModules(net)
   -- torch, our relationship is a complicated love/hate thing. And right here it's the latter
   local t = torch.type(net)
@@ -95,6 +109,7 @@ function net_utils.listModules(net)
   end
   return moduleList
 end
+
 function net_utils.sanitize_gradients(net)
   local moduleList = net_utils.listModules(net)
   for k,m in ipairs(moduleList) do
