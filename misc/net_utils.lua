@@ -1,7 +1,7 @@
 local utils = require 'misc.utils'
 local net_utils = {}
 
-function net_utils.send_to_gpu(videos, labels)
+function net_utils.send_to_gpu(videos, labels, ids)
   if type(videos) == 'table' then
     for i=1,#videos do
       videos[i] = videos[i]:float():cuda()
@@ -10,9 +10,11 @@ function net_utils.send_to_gpu(videos, labels)
     videos = videos:float():cuda()
   end
 
-  labels = labels:float():cuda()
+  if labels ~= nil then
+    labels = labels:float():cuda()
+  end
 
-  return videos, labels
+  return videos, labels, ids
 end
 
 function net_utils.build_cnn(cnn, opt)
