@@ -29,9 +29,9 @@ end
 --[[
 performs language evaluation by running coco python code. 
 ]]
-function utils.lang_eval(samples, vid_ids, score)
-  local filename = 'val_sample'
-  local file = io.open('coco_evaluation/'..filename .. '.txt', 'w')
+function utils.lang_eval(samples, vid_ids)
+  local filename = 'valSample'
+  local file = io.open('coco_evaluation/' .. filename .. '.txt', 'w')
   -- convert split samples to sentences
   local split_samples = ''
   local split_size = #samples
@@ -48,21 +48,23 @@ function utils.lang_eval(samples, vid_ids, score)
 
   -- retrieve scores 
   scores = utils.read_json('coco_evaluation/' .. filename ..'.json')
-  return scores[score], split_samples
+  return scores, split_samples
 end
 
-function utils.decode_seq(tensor_seq)
-  seq_len = tensor_seq:size(1)
-  sent = ''
-  print(seq_len)
-  for s=1,seq_len do
-    local ix = tensor_seq:select(1, s):select(1, 1)
-    if utils.ix_to_word[ix] == nil then 
-      if s == 1 then 
-        sent = sent .. ' a'
+function utils.decode_seq(seq)
+  seq_len = #seq
+  if seq_len == 0 then
+    sent = 'a'
+  else
+    sent = ''
+    for s=1,seq_len do
+      local ix = seq[s]
+      if utils.ix_to_word[ix] == nil then 
+        break
+      else 
+        sent = sent .. utils.ix_to_word[ix] .. ' ' 
       end
-      break
-    else sent = sent .. utils.ix_to_word[ix] .. ' ' end
+    end
   end
 
   return sent
