@@ -16,7 +16,7 @@ function layer:__init(opt)
   self.rnn_size = utils.getopt(opt, 'rnn_size')
   self.num_layers = utils.getopt(opt, 'num_layers', 1)
   self.max_seq_len = utils.getopt(opt, 'max_seqlen')
-  local dropout = utils.getopt(opt, 'dropout', 0)
+  local dropout = utils.getopt(opt, 'drop_prob', 0)
 
   -- create the core lstm network. note +1 for both the START and END tokens
   self.core = LSTM.lstm(self.input_encoding_size, self.vocab_size + 1, self.rnn_size, self.num_layers, dropout)
@@ -93,7 +93,7 @@ function layer:evaluate()
 end
 
 function layer:sample(input, opt)
-  local vid = input[1]
+  local vid = input
   local sample_max = utils.getopt(sample_max, 'sample_max', 1)
   local temperature = utils.getopt(opt, 'temperature', 1.0)
 
@@ -105,8 +105,7 @@ function layer:sample(input, opt)
   local state = self.init_state
 
   -- we will write output predictions into tensor seq
-  local output_seq = torch.LongTensor(nsteps-vid_length, batch_size):zero()
-  local seqLogprobs = torch.FloatTensor(nsteps-vid_length, batch_size)
+  local output_seq = {}
   local logprobs -- logprobs predicted in last time step
 
   for t=1,nsteps do
@@ -135,12 +134,9 @@ function layer:sample(input, opt)
         sampleLogprobs = logprobs:gather(2, it) -- gather the logprobs at sampled positions
         it = it:view(-1):long() -- and flatten indices for downstream processing
       end
+      table.insert(output_seq, it[1])
+      if it[1] == self.vocab_size + 1 then break end
       xt = self.lookup_table:forward(it)
-    end
-
-    if t > vid_length+1 then
-      output_seq[t-(vid_length+1)] = it
-      seqLogprobs[t-(vid_length+1)] = sampleLogprobs:view(-1):float()
     end
 
     local inputs = {xt,unpack(state)}
@@ -150,7 +146,7 @@ function layer:sample(input, opt)
     for i=1,self.num_state do table.insert(state, out[i]) end
   end
 
-  return output_seq, seqLogprobs
+  return output_seq
 end
 
 function layer:updateOutput(input)

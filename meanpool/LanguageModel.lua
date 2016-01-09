@@ -100,15 +100,14 @@ function layer:sample(input, opt)
   local state = self.init_state
 
   -- we will write output predictions into tensor seq
-  local output_seq = torch.LongTensor(nsteps-1, batch_size):zero()
-  local seqLogprobs = torch.FloatTensor(nsteps-1, batch_size)
+  local output_seq = {}
   local logprobs -- logprobs predicted in last time step
 
   for t=1,nsteps do
     local xt, it, sampleLogprobs
     if t == 1 then
       -- feed in the images
-      xt = mean_frame -- NxK sized input
+      xt = mean_frame
       if xt:nDimension() == 1 then xt = xt:view(1, -1) end
     elseif t == 2 then
       -- feed in the start tokens
@@ -131,12 +130,9 @@ function layer:sample(input, opt)
         sampleLogprobs = logprobs:gather(2, it) -- gather the logprobs at sampled positions
         it = it:view(-1):long() -- and flatten indices for downstream processing
       end
+      table.insert(output_seq, it[1])
+      if it[1] == self.vocab_size + 1 then break end
       xt = self.lookup_table:forward(it)
-    end
-
-    if t > 2 then
-      output_seq[t-2] = it
-      seqLogprobs[t-2] = sampleLogprobs:view(-1):float()
     end
 
     local inputs = {xt,unpack(state)}
@@ -146,7 +142,7 @@ function layer:sample(input, opt)
     for i=1,self.num_state do table.insert(state, out[i]) end
   end
 
-  return output_seq, seqLogprobs
+  return output_seq
 end
 
 function layer:updateOutput(input)
