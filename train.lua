@@ -21,7 +21,7 @@ cmd:option('-drop_prob', 0, 'probability for dropout (0 = no dropout)')
 cmd:option('-video_dir', '', 'directory where to read video data from')
 cmd:option('-label_dir', '', 'directory where to read labels/captions from')
 cmd:option('-vocab_file', '', 'path to vocabulary file')
-cmd:option('-save_dir', '', 'directory where to save pre-processed data')
+cmd:option('-save_dir', '', 'directory where to save/load pre-processed data')
 -- general optimization
 cmd:option('-max_seqlen', 80, 'maximum sequence length during training. seqlen = vidlen + caplen and truncates the video if necessary')
 cmd:option('-batch_size', 16, 'size of mini-batch')
@@ -34,6 +34,10 @@ cmd:option('-optim_beta',0.999,'beta used for adam')
 cmd:option('-optim_epsilon',1e-8,'epsilon that goes into denominator for smoothing')
 cmd:option('-decay_start', -1, 'at what iteration to start decaying learning rate? (-1 = dont)')
 cmd:option('-decay_rate', 50000, 'decay rate')
+-- cnn options
+cmd:option('-backend', 'cudnn', 'nn|cudnn')
+cmd:option('-cnn_proto','/scratch/cluster/vsub/ssayed/cv/VGG_ILSVRC_16_layers_deploy.prototxt','path to CNN prototxt file in Caffe format')
+cmd:option('-cnn_model','/scratch/cluster/vsub/ssayed/cv/VGG_ILSVRC_16_layers.caffemodel','path to CNN model file containing the weights')
 -- printing updates and saving checkpoints
 cmd:option('-lang_metric','METEOR','metric to use for saving checkpoints METEOR|CIDEr|ROUGE_L')
 cmd:option('-print_every',1,'how many steps/minibatches between printing out the loss')
@@ -53,7 +57,9 @@ torch.setdefaulttensortype('torch.FloatTensor') -- for CPU
 if opt.gpuid >= 0 then
   require 'cutorch'
   require 'cunn'
-  if opt.backend == 'cudnn' then require 'cudnn' end
+  if opt.model == 'frames_cnn' and opt.backend == 'cudnn' then 
+  	require 'cudnn' 
+  end
   cutorch.manualSeed(opt.seed)
   cutorch.setDevice(opt.gpuid + 1) -- note +1 because lua is 1-indexed
 end
@@ -62,6 +68,7 @@ end
 require (opt.model .. '.DataLoader')
 local loader = DataLoader(opt)
 utils.setVocab(loader:getVocab())
+local batchVideos, batchLabels, _, labelsPerVideo = loader:getBatch(1)
 
 -- create model 
 require (opt.model .. '.LanguageModel')
@@ -101,7 +108,7 @@ local function sampleSplit(split_ix)
   for ix=1,numSamples do
 	  local video, _, id = loader:getBatch(split_ix)
 
-	  if opt.gpuid >= 0 then video, _ = net_utils.send_to_gpu(video) end
+	  if opt.gpuid >= 0 then video, _ = net_utils.send_to_gpu(opt.model, video) end
 
     local sample, logprobs = protos.lm:sample(video, {sample_max=opt.sample_max, temperature=opt.temperature})
 
@@ -124,7 +131,7 @@ local function evalSplit(split_ix)
     -- fetch a batch of data
  		local batchVideos, batchLabels, _ = loader:getBatch(split_ix)
 
-		if opt.gpuid >= 0 then batchVideos, batchLabels = net_utils.send_to_gpu(batchVideos, batchLabels) end
+		if opt.gpuid >= 0 then batchVideos, batchLabels = net_utils.send_to_gpu(opt.model, batchVideos, batchLabels) end
 
     -- forward the model to get loss
     local logprobs = protos.lm:forward{batchVideos, batchLabels}
@@ -142,12 +149,12 @@ local function lossFun()
   grad_params:zero()
 
   -- get batch of data  
-  local batchVideos, batchLabels, _ = loader:getBatch(1)
-
-  if opt.gpuid >= 0 then batchVideos, batchLabels = net_utils.send_to_gpu(batchVideos, batchLabels) end
+  local batchVideos, batchLabels, _, labelsPerVideo = loader:getBatch(1)
+  print(batchVideos)
+  if opt.gpuid >= 0 then batchVideos, batchLabels = net_utils.send_to_gpu(opt.model, batchVideos, batchLabels) end
 
   -- forward pass
-  local logprobs = protos.lm:forward{batchVideos, batchLabels}
+  local logprobs = protos.lm:forward{batchVideos, batchLabels, labelsPerVideo}
   local loss = protos.crit:forward(logprobs, batchLabels)
 
   -- backward pass
