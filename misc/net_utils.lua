@@ -1,15 +1,13 @@
 local utils = require 'misc.utils'
 local net_utils = {}
 
-function net_utils.send_to_gpu(model, videos, labels, ids)
-  if model ~= 'frames_cnn' then
-    if type(videos) == 'table' then
-      for i=1,#videos do
-        videos[i] = videos[i]:float():cuda()
-      end
-    else
-      videos = videos:float():cuda()
+function net_utils.send_to_gpu(videos, labels, ids)
+  if type(videos) == 'table' then
+    for i=1,#videos do
+      videos[i] = videos[i]:float():cuda()
     end
+  else
+    videos = videos:float():cuda()
   end
 
   if labels ~= nil then
@@ -17,83 +15,6 @@ function net_utils.send_to_gpu(model, videos, labels, ids)
   end
 
   return videos, labels, ids
-end
-
-function net_utils.build_cnn(opt)
-  require 'loadcaffe'
-
-  local cnn_backend = opt.backend
-  if opt.gpuid == -1 then cnn_backend = 'nn' end -- override to nn if gpu is disabled
-  local cnn = loadcaffe.load(opt.cnn_proto, opt.cnn_model, cnn_backend)
-
-  local layer_num = utils.getopt(opt, 'layer_num', 38) -- 29
-  local backend = utils.getopt(opt, 'backend', 'cudnn')
-  
-  if backend == 'cudnn' then
-    require 'cudnn'
-    backend = cudnn
-  elseif backend == 'nn' then
-    require 'nn'
-    backend = nn
-  else
-    error(string.format('Unrecognized backend "%s"', backend))
-  end
-
-  -- copy over the first layer_num layers of the CNN
-  local cnn_part = nn.Sequential()
-  for i = 1, layer_num do
-    local layer = cnn:get(i)
-
-    if i == 1 then
-      -- convert kernels in first conv layer into RGB format instead of BGR,
-      -- which is the order in which it was trained in Caffe
-      local w = layer.weight:clone()
-      -- swap weights to R and B channels
-      print('converting first layer conv filters from BGR to RGB...')
-      layer.weight[{ {}, 1, {}, {} }]:copy(w[{ {}, 3, {}, {} }])
-      layer.weight[{ {}, 3, {}, {} }]:copy(w[{ {}, 1, {}, {} }])
-    end
-    cnn_part:add(layer)
-  end
-
-  -- cnn_part:add(nn.Linear(4096,encoding_size))
-  cnn_part:add(backend.ReLU(true))
-  return cnn_part
-end
-
-function net_utils.cnn_prepro(imgs, data_augment, on_gpu)
-  assert(data_augment ~= nil, 'pass this in. careful here.')
-  assert(on_gpu ~= nil, 'pass this in. careful here.')
-
-  local h,w = imgs:size(3), imgs:size(4)
-  local cnn_input_size = 224
-
-  -- cropping data augmentation, if needed
-  if h > cnn_input_size or w > cnn_input_size then 
-    local xoff, yoff
-    if data_augment then
-      xoff, yoff = torch.random(w-cnn_input_size), torch.random(h-cnn_input_size)
-    else
-      -- sample the center
-      xoff, yoff = math.ceil((w-cnn_input_size)/2), math.ceil((h-cnn_input_size)/2)
-    end
-    -- crop.
-    imgs = imgs[{ {}, {}, {yoff,yoff+cnn_input_size-1}, {xoff,xoff+cnn_input_size-1} }]
-  end
-
-  -- ship to gpu or convert from byte to float
-  if on_gpu >= 0 then imgs = imgs:cuda() else imgs = imgs:float() end
-
-  -- lazily instantiate vgg_mean
-  if not net_utils.vgg_mean then
-    net_utils.vgg_mean = torch.FloatTensor{123.68, 116.779, 103.939}:view(1,3,1,1) -- in RGB order
-  end
-  net_utils.vgg_mean = net_utils.vgg_mean:typeAs(imgs) -- a noop if the types match
-
-  -- subtract vgg mean
-  imgs:add(-1, net_utils.vgg_mean:expandAs(imgs))
-
-  return imgs
 end
 
 function net_utils.list_nngraph_modules(g)
@@ -158,38 +79,6 @@ function net_utils.clone_list(lst)
     new[k] = v:clone()
   end
   return new
-end
-
-local layer, parent = torch.class('nn.FeatExpander', 'nn.Module')
-function layer:__init()
-  parent.__init(self)
-end
-
-function layer:updateOutput(input)
-  local labels_per_video = input[2]
-  local input = input[1]
-  local totalLabels = 0
-  for i=1,#labels_per_video do totalLabels = totalLabels + labels_per_video[i] end
-  -- simply expands out the features. Performs a copy information
-  assert(input:nDimension() == 2)
-  local d = input:size(2)
-  self.output:resize(totalLabels, d)
-  local ix = 1
-  for k=1,#labels_per_video do
-    self.output[{ {ix,ix+labels_per_video[k]-1} }] = input[{ {k,k}, {} }]:expand(labels_per_video[k], d) -- copy over
-    ix = ix + labels_per_video[k]
-  end
-  return self.output
-end
-
-function layer:updateGradInput(labels_per_video, gradOutput)
-  self.gradInput:resizeAs(#labels_per_video, gradOutput:size(2))
-  local ix = 1
-  for k=1,#labels_per_video do
-    self.gradInput[k] = torch.sum(gradOutput[{ {j,j+labels_per_video[k]-1} }], 1)
-    ix = ix + labels_per_video[k]
-  end
-  return self.gradInput
 end
 
 return net_utils
