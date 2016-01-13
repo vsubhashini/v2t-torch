@@ -22,7 +22,7 @@ function layer:__init(opt)
 
   -- create the core lstm network. note +1 for both the START and END tokens
   self.cnn = net_utils.build_cnn(opt)
-  self.feat_expander = nn.FeatExpander()
+  self.expander = net_utils.build_cnn(opt)
   self.core = LSTM.lstm(self.input_encoding_size, self.vocab_size + 1, self.rnn_size, self.num_layers, dropout)
   self.lookup_table = nn.LookupTable(self.vocab_size + 1, self.input_encoding_size)
   self:_createInitState(1) -- will be lazily resized later during forward passes
@@ -50,10 +50,13 @@ function layer:createClones()
   print('constructing clones inside the LanguageModel')
   -- self.clones = torch.load('/scratch/cluster/vsub/ssayed/cv/clones.t7')
   -- self.lookup_tables = torch.load('/scratch/cluster/vsub/ssayed/cv/tables.t7')
-  self.clones = {self.core}
+  self.cnnClones = {self.cnn}
+  self.coreClones = {self.core}
   self.lookup_tables = {self.lookup_table}
   for t=2,self.max_seq_len do
-    self.clones[t] = self.core:clone('weight', 'bias', 'gradWeight', 'gradBias')
+    print(t)
+    self.cnnClones[t] = self.cnn:clone('weight', 'bias', 'gradWeight', 'gradBias')
+    self.coreClones[t] = self.core:clone('weight', 'bias', 'gradWeight', 'gradBias')
     self.lookup_tables[t] = self.lookup_table:clone('weight', 'gradWeight')
   end
   -- torch.save('/scratch/cluster/vsub/ssayed/cv/clones.t7', self.clones)
@@ -97,7 +100,7 @@ function layer:evaluate()
 end
 
 function layer:sample(input, opt)
-  local vid = input[1]
+  local vid = input
   local sample_max = utils.getopt(sample_max, 'sample_max', 1)
   local temperature = utils.getopt(opt, 'temperature', 1.0)
 
@@ -109,11 +112,11 @@ function layer:sample(input, opt)
   local state = self.init_state
 
   -- we will write output predictions into tensor seq
-  local output_seq = torch.LongTensor(nsteps-vid_length, batch_size):zero()
-  local seqLogprobs = torch.FloatTensor(nsteps-vid_length, batch_size)
+  local output_seq = {}
   local logprobs -- logprobs predicted in last time step
+  local maxlen = 200
 
-  for t=1,nsteps do
+  for t=1,maxlen do
     local xt, it, sampleLogprobs
     if t <= vid_length then
       xt = vid[t]
@@ -139,12 +142,9 @@ function layer:sample(input, opt)
         sampleLogprobs = logprobs:gather(2, it) -- gather the logprobs at sampled positions
         it = it:view(-1):long() -- and flatten indices for downstream processing
       end
+      table.insert(output_seq, it[1])
+      if it[1] == self.vocab_size + 1 then break end
       xt = self.lookup_table:forward(it)
-    end
-
-    if t > vid_length+1 then
-      output_seq[t-(vid_length+1)] = it
-      seqLogprobs[t-(vid_length+1)] = sampleLogprobs:view(-1):float()
     end
 
     local inputs = {xt,unpack(state)}
@@ -154,13 +154,12 @@ function layer:sample(input, opt)
     for i=1,self.num_state do table.insert(state, out[i]) end
   end
 
-  return output_seq, seqLogprobs
+  return output_seq
 end
 
 function layer:updateOutput(input)
   local vid = input[1]
   local output_seq = input[2]
-  local labels_per_vid = input[3]
 
   if self.clones == nil then self:createClones() end -- lazily create clones on first forward pass
 
@@ -178,17 +177,11 @@ function layer:updateOutput(input)
   self.tmax = 0
 
   if nsteps > self.max_seq_len then nsteps = self.max_seq_len end
-  print(self.vid_length)
   for t=1,nsteps do
-    print(t)
     local xt
     -- encoding sequence 
     if t <= self.vid_length then
       xt = vid[t] -- NxK sized input
-      xt = self.cnn:forward(net_utils.cnn_prepro(xt, false, self.gpuid))
-      print(xt:type())
-      xt = self.feat_expander:forward{xt, labels_per_vid}
-      print(xt:type())
     -- if there is an encoding sequence and it has just ended, feed in the START tokens 
     elseif t == self.vid_length+1 then 
       local it = torch.LongTensor(batch_size):fill(self.vocab_size+1) -- Nx1 vector of START tokens 
@@ -250,7 +243,7 @@ function layer:updateGradInput(input, gradOutput)
   end
 
   -- we have gradient on image, but for LongTensor gt sequence we only create an empty tensor - can't backprop
-  self.gradInput = {dimgs, torch.Tensor()}
+  self.gradInput = {dframes, torch.Tensor()}
   return self.gradInput
 end
 

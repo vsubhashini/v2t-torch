@@ -67,7 +67,7 @@ def main(params):
 	
 	sentences = np.zeros((num_sent, longest_sent+1), dtype='uint32')
 	label_length = np.zeros((num_sent), dtype='uint32')
-	# vid_ids = np.zeros((num_sent), dtype='uint32')
+	vid_ids = np.zeros((num_sent), dtype='uint32')
 	start_ix = np.zeros((vid_end-vid_start+1), dtype='uint32')
 	end_ix = np.zeros((vid_end-vid_start+1), dtype='uint32')
 
@@ -92,7 +92,8 @@ def main(params):
 			sentences[sent_count-1, len(words)] = vocab_size+1
 
 			label_length[sent_count-1] = len(words)+1
-			# vid_ids[sent_count-1] = vid_count
+			vid_ids[sent_count-1] = vid_count
+	end_ix[-1] = sent_count
 
 
 	print('processing videos...')

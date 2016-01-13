@@ -22,6 +22,7 @@ function DataLoader:__init(opt)
   end
 
   self.batchSize = opt.batch_size
+  self.labelsPerVid = opt.labels_per_vid
   self.max_seqlen = opt.max_seqlen
   print('loading preprocessed files...')
   local dataInfo = utils.read_json(info)
@@ -36,15 +37,15 @@ function DataLoader:__init(opt)
   self.h5_train = hdf5.open(path.join(opt.save_dir, 'train.h5'), 'r')
   self.h5_val = hdf5.open(path.join(opt.save_dir, 'val.h5'), 'r')
 
-  -- local numTrainLabels = self.h5_train:read('/labels'):dataspaceSize()[1]
-  -- local numValLabels = self.h5_val:read('/labels'):dataspaceSize()[1]
-  -- local numValVideos = self.h5_val:read('/videos'):dataspaceSize()[1]
+  local numTrainLabels = self.h5_train:read('/labels'):dataspaceSize()[1]
+  local numValLabels = self.h5_val:read('/labels'):dataspaceSize()[1]
+  local numValVideos = self.h5_val:read('/videos'):dataspaceSize()[1]
 
-  -- if numTrainLabels % self.batchSize ~= 0 then
-  --   repeat
-  --     numTrainLabels = numTrainLabels - 1
-  --   until numTrainLabels % self.batchSize == 0
-  -- end
+  if numTrainLabels % self.batchSize ~= 0 then
+    repeat
+      numTrainLabels = numTrainLabels - 1
+    until numTrainLabels % self.batchSize == 0
+  end
 
   -- self.splits = {'train', 'val', 'valEval'}
   -- self.splitSizes = {numTrainLabels, numValLabels, numValVideos}
@@ -58,9 +59,26 @@ function DataLoader:__init(opt)
   self.splits = {'train', 'val'}
   local numTrainVideos = self.h5_train:read('/videos'):dataspaceSize()[1]
   local numValVideos = self.h5_val:read('/videos'):dataspaceSize()[1]
-  self.splitSizes = {numTrainVideos, numValVideos}
+  self.splitSizes = {numTrainVideos, numValVideos, numValVideos}
 
-  for i=1,#self.splits do    
+  self.data_files = {self.h5_train, self.h5_val}
+  self.iter = {0, 0, 0}
+  self.evalDict = {} 
+
+  self.labelsPerVideo = {}
+  self.vidCapIter = {}
+  for splitIx=1, #self.splits do
+    table.insert(self.labelsPerVideo, {})
+    table.insert(self.vidCapIter, {})
+    for k=1,self.splitSizes[splitIx] do
+      local start_ix = self.data_files[splitIx]:read('label_start_ix'):partial({k,k})[1]
+      local end_ix = self.data_files[splitIx]:read('label_end_ix'):partial({k,k})[1]
+      table.insert(self.labelsPerVideo[splitIx], end_ix-start_ix+1)
+      table.insert(self.vidCapIter[splitIx], 1)
+    end
+  end
+
+  for i=1,#self.splits do   
     if self.splitSizes[i] % self.batchSize ~= 0 then
       repeat
         self.splitSizes[i] = self.splitSizes[i] - 1
@@ -68,10 +86,6 @@ function DataLoader:__init(opt)
     end
     self.splitSizes[i] = self.splitSizes[i]/self.batchSize
   end
-
-  self.data_files = {self.h5_train, self.h5_val}
-  self.iter = {0, 0, 0}
-  self.evalDict = {} 
 end
 
 -- function DataLoader:getBatch(split_ix)
@@ -128,25 +142,27 @@ end
 
 function DataLoader:getBatch(split_ix)
 
-  -- if split_ix == 3 then 
-  --   video, id = self:getEvalBatch()
-  --   return video, nil, id
-  -- end
+  if split_ix == 3 then 
+    video, id = self:getEvalBatch()
+    return video, nil, id
+  end
 
   local batchSize
 
   -- find max vid size 
   local longestVid = 0
   local longestCap = 0
-  local numCaptions = 0
   for i=1,self.batchSize do -- find longest caption and video in batch
     local vidId = self.iter[split_ix]*self.batchSize + i
     local capStartIx = self.data_files[split_ix]:read('label_start_ix'):partial({vidId,vidId})[1]
-    local capEndIx = self.data_files[split_ix]:read('label_end_ix'):partial({vidId,vidId})[1]
-    for capix=capStartIx,capEndIx do
-      numCaptions = numCaptions + 1
+    local capix = capStartIx + self.vidCapIter[split_ix][vidId] - 1
+    for k=1,self.labelsPerVid do
+      if capix > capStartIx + self.labelsPerVideo[split_ix][vidId] - 1 then
+        capix = capStartIx
+      end
       local capSize = self.data_files[split_ix]:read('/label_length'):partial({capix,capix})[1]
       if capSize > longestCap then longestCap = capSize end
+      capix = capix + 1
     end
 
     local vidSize = self.data_files[split_ix]:read('/video_length'):partial({vidId, vidId})[1]
@@ -168,39 +184,48 @@ function DataLoader:getBatch(split_ix)
     end
   end
 
-  local batchLabels = torch.LongTensor(longestCap, numCaptions):zero()
+  local batchLabels = torch.LongTensor(longestCap, self.batchSize*self.labelsPerVid):zero()
   local batchCapId = 0
-  local capPerVideo = {}
   for i=1,self.batchSize do
     local vidId = self.iter[split_ix]*self.batchSize + i
     local capStartIx = self.data_files[split_ix]:read('label_start_ix'):partial({vidId,vidId})[1]
-    local capEndIx = self.data_files[split_ix]:read('label_end_ix'):partial({vidId,vidId})[1]
-    for capix=capStartIx,capEndIx do
+    for k=1,self.labelsPerVid do
       batchCapId = batchCapId + 1
+      local capix = capStartIx + self.vidCapIter[split_ix][vidId] - 1
+      if capix > capStartIx + self.labelsPerVideo[split_ix][vidId] - 1 then
+        capix = capStartIx
+        self.vidCapIter[split_ix][vidId] = 1
+      end
       local caplen = self.data_files[split_ix]:read('/label_length'):partial({capix,capix})[1]
       local cap = self.data_files[split_ix]:read('/labels'):partial({capix,capix}, {1,caplen}):select(1,1)
       batchLabels:select(2,batchCapId):sub(1,cap:nElement()):copy(cap)
+      self.vidCapIter[split_ix][vidId] = self.vidCapIter[split_ix][vidId] + 1
     end
-    table.insert(capPerVideo, capEndIx-capStartIx+1)
   end
   self.iter[split_ix] = self.iter[split_ix] + 1
 
-  return batchVideos, batchLabels, nil, capPerVideo
+  if self.iter[split_ix] >= self.splitSizes[split_ix] then
+    self.iter[split_ix] = 0
+  end
+
+  return batchVideos, batchLabels
 end
 
 function DataLoader:getEvalBatch()
-  local stop = false
-  local vidId
-  repeat 
-    local rawSplitId = self.rand[2][self.iter[3] + 1]
-    vidId = self.data_files[2]:read('/label_to_id'):partial({rawSplitId, rawSplitId})[1]
-    if self.evalDict[vidId] == nil then
-      self.evalDict[vidId] = true
-      stop = true
-    end
+  -- local stop = false
+  -- local vidId
+  -- repeat 
+  --   local rawSplitId = self.rand[2][self.iter[3] + 1]
+  --   vidId = self.data_files[2]:read('/label_to_id'):partial({rawSplitId, rawSplitId})[1]
+  --   if self.evalDict[vidId] == nil then
+  --     self.evalDict[vidId] = true
+  --     stop = true
+  --   end
 
-    self.iter[3] = self.iter[3] + 1
-  until stop
+  --   self.iter[3] = self.iter[3] + 1
+  -- until stop
+  self.iter[3] = self.iter[3] + 1
+  local vidId = self.iter[3]
 
   local video = {}
   local vidlen = self.data_files[2]:read('/video_length'):partial({vidId, vidId})[1]
@@ -212,7 +237,7 @@ function DataLoader:getEvalBatch()
     video[frameNum]:select(1, 1):copy(frame)
   end
 
-  return video, 'vid' .. vidId
+  return video, 'vid' .. (vidId + 1200)
 end
 
 function DataLoader:getVocabSize()
