@@ -21,8 +21,6 @@ function layer:__init(opt)
   self.gpuid = opt.gpuid
 
   -- create the core lstm network. note +1 for both the START and END tokens
-  self.cnn = net_utils.build_cnn(opt)
-  self.expander = net_utils.build_cnn(opt)
   self.core = LSTM.lstm(self.input_encoding_size, self.vocab_size + 1, self.rnn_size, self.num_layers, dropout)
   self.lookup_table = nn.LookupTable(self.vocab_size + 1, self.input_encoding_size)
   self:_createInitState(1) -- will be lazily resized later during forward passes
@@ -48,19 +46,13 @@ end
 function layer:createClones()
   -- construct the net clones
   print('constructing clones inside the LanguageModel')
-  -- self.clones = torch.load('/scratch/cluster/vsub/ssayed/cv/clones.t7')
-  -- self.lookup_tables = torch.load('/scratch/cluster/vsub/ssayed/cv/tables.t7')
-  self.cnnClones = {self.cnn}
   self.coreClones = {self.core}
   self.lookup_tables = {self.lookup_table}
   for t=2,self.max_seq_len do
     print(t)
-    self.cnnClones[t] = self.cnn:clone('weight', 'bias', 'gradWeight', 'gradBias')
     self.coreClones[t] = self.core:clone('weight', 'bias', 'gradWeight', 'gradBias')
     self.lookup_tables[t] = self.lookup_table:clone('weight', 'gradWeight')
   end
-  -- torch.save('/scratch/cluster/vsub/ssayed/cv/clones.t7', self.clones)
-  -- torch.save('/scratch/cluster/vsub/ssayed/cv/tables.t7', self.lookup_tables)
 end
 
 function layer:getModulesList()
