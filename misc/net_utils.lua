@@ -1,24 +1,6 @@
 local utils = require 'misc.utils'
 local net_utils = {}
 
-function net_utils.send_to_gpu(model, videos, labels, ids)
-  if model ~= 'frames_cnn' then
-    if type(videos) == 'table' then
-      for i=1,#videos do
-        videos[i] = videos[i]:float():cuda()
-      end
-    else
-      videos = videos:float():cuda()
-    end
-  end
-
-  if labels ~= nil then
-    labels = labels:float():cuda()
-  end
-
-  return videos, labels, ids
-end
-
 function net_utils.build_cnn(opt)
   require 'loadcaffe'
 
@@ -161,33 +143,31 @@ function net_utils.clone_list(lst)
 end
 
 local layer, parent = torch.class('nn.FeatExpander', 'nn.Module')
-function layer:__init()
+function layer:__init(n)
   parent.__init(self)
+  self.n = n
 end
 
 function layer:updateOutput(input)
-  local labels_per_video = input[2]
-  local input = input[1]
-  local totalLabels = 0
-  for i=1,#labels_per_video do totalLabels = totalLabels + labels_per_video[i] end
+  if self.n == 1 then self.output = input; return self.output end -- act as a noop for efficiency
   -- simply expands out the features. Performs a copy information
   assert(input:nDimension() == 2)
   local d = input:size(2)
-  self.output:resize(totalLabels, d)
-  local ix = 1
-  for k=1,#labels_per_video do
-    self.output[{ {ix,ix+labels_per_video[k]-1} }] = input[{ {k,k}, {} }]:expand(labels_per_video[k], d) -- copy over
-    ix = ix + labels_per_video[k]
+  self.output:resize(input:size(1)*self.n, d)
+  for k=1,input:size(1) do
+    local j = (k-1)*self.n+1
+    self.output[{ {j,j+self.n-1} }] = input[{ {k,k}, {} }]:expand(self.n, d) -- copy over
   end
   return self.output
 end
-
-function layer:updateGradInput(labels_per_video, gradOutput)
-  self.gradInput:resizeAs(#labels_per_video, gradOutput:size(2))
-  local ix = 1
-  for k=1,#labels_per_video do
-    self.gradInput[k] = torch.sum(gradOutput[{ {j,j+labels_per_video[k]-1} }], 1)
-    ix = ix + labels_per_video[k]
+function layer:updateGradInput(input, gradOutput)
+  if self.n == 1 then self.gradInput = gradOutput; return self.gradInput end -- act as noop for efficiency
+  -- add up the gradients for each block of expanded features
+  self.gradInput:resizeAs(input)
+  local d = input:size(2)
+  for k=1,input:size(1) do
+    local j = (k-1)*self.n+1
+    self.gradInput[k] = torch.sum(gradOutput[{ {j,j+self.n-1} }], 1)
   end
   return self.gradInput
 end

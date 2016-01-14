@@ -3,7 +3,7 @@
 
 function sgd(x, dx, lr, update)
   x:add(-lr, dx)
-  update:add(-lr, dx)
+  -- update:add(-lr, dx)
 end
 
 function sgdm(x, dx, lr, alpha, state, update)
@@ -14,7 +14,7 @@ function sgdm(x, dx, lr, alpha, state, update)
   state.v:mul(alpha)
   state.v:add(lr, dx)
   x:add(-1, state.v)
-  update:add(-1, state.v)
+  -- update:add(-1, state.v)
 end
 
 function sgdmom(x, dx, lr, alpha, state, update)
@@ -27,8 +27,8 @@ function sgdmom(x, dx, lr, alpha, state, update)
   state.m:mul(alpha):add(-lr, dx)
   x:add(-alpha, state.tmp)
   x:add(1+alpha, state.m)
-  update:add(-alpha, state.tmp)
-  update:add(1*alpha, state.m)
+  -- update:add(-alpha, state.tmp)
+  -- update:add(1*alpha, state.m)
 end
 
 function adagrad(x, dx, lr, epsilon, state)
@@ -55,7 +55,7 @@ function rmsprop(x, dx, lr, alpha, epsilon, state, update)
   -- perform update
   state.tmp:sqrt(state.m):add(epsilon)
   x:addcdiv(-lr, dx, state.tmp)
-  update:addcdiv(-lr, dx, state.tmp)
+  -- update:addcdiv(-lr, dx, state.tmp)
 end
 
 function adam(x, dx, lr, beta1, beta2, epsilon, state)
