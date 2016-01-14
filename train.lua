@@ -20,8 +20,8 @@ cmd:option('-drop_prob', 0, 'probability for dropout (0 = no dropout)')
 -- data loading/pre-processing
 cmd:option('-video_dir', '', 'directory where to read video data from')
 cmd:option('-label_dir', '', 'directory where to read labels/captions from')
-cmd:option('-vocab_file', '', 'path to vocabulary file')
-cmd:option('-save_dir', '', 'directory where to save/load pre-processed data')
+cmd:option('-vocab_file', '/scratch/cluster/vsub/ssayed/youtube_dataset/labels/vocabulary.txt', 'path to vocabulary file')
+cmd:option('-save_dir', '/scratch/cluster/vsub/ssayed/youtube_dataset/mean_pooled', 'directory where to save/load pre-processed data')
 -- general optimization
 cmd:option('-max_seqlen', 80, 'maximum sequence length during training. seqlen = vidlen + caplen and truncates the video if necessary')
 cmd:option('-batch_size', 16, 'size of mini-batch')
@@ -34,7 +34,7 @@ cmd:option('-optim_beta',0.999,'beta used for adam')
 cmd:option('-optim_epsilon',1e-8,'epsilon that goes into denominator for smoothing')
 cmd:option('-decay_start', -1, 'at what iteration to start decaying learning rate? (-1 = dont)')
 cmd:option('-decay_rate', 50000, 'decay rate')
--- printing updates and saving checkpoints
+-- printing updates and saving checkpointsc
 cmd:option('-lang_metric','METEOR','metric to use for saving checkpoints METEOR|CIDEr|ROUGE_L')
 cmd:option('-print_every',1,'how many steps/minibatches between printing out the loss')
 cmd:option('-eval_model_every', 200, 'how many steps/minibatches between loss and language evaluation on model')
