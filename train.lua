@@ -13,7 +13,7 @@ cmd:text('Train a Video Captioning model')
 cmd:text()
 cmd:text('Options')
 -- model options 
-cmd:option('-model', 'meanpool', 'type of model to use? meanpool|frames|frames_cnn')
+cmd:option('-model', 'frames_cnn', 'type of model to use? frames_cnn')
 cmd:option('-num_layers', 2, 'number of layers in lstm')
 cmd:option('-rnn_size', 512, 'size of the rnn in number of hidden nodes in each layer')
 cmd:option('-drop_prob', 0, 'probability for dropout (0 = no dropout)')
@@ -21,10 +21,11 @@ cmd:option('-drop_prob', 0, 'probability for dropout (0 = no dropout)')
 cmd:option('-video_dir', '', 'directory where to read video data from')
 cmd:option('-label_dir', '', 'directory where to read labels/captions from')
 cmd:option('-vocab_file', '', 'path to vocabulary file')
-cmd:option('-save_dir', '', 'directory where to save/load pre-processed data')
+cmd:option('-save_dir', '/scratch/cluster/vsub/ssayed/youtube_dataset/frames_cnn', 'directory where to save/load pre-processed data')
 -- general optimization
 cmd:option('-max_seqlen', 80, 'maximum sequence length during training. seqlen = vidlen + caplen and truncates the video if necessary')
-cmd:option('-batch_size', 16, 'size of mini-batch')
+cmd:option('-batch_size', 5, 'size of mini-batch')
+cmd:option('-labels_per_vid', 5, '..')
 cmd:option('-epochs', -1, 'max number of epochs to run for (-1 = run forever)')
 -- optimization learning
 cmd:option('-optim','rmsprop', 'what update to use? rmsprop|sgd|sgdmom|adagrad|adam')
@@ -38,6 +39,12 @@ cmd:option('-decay_rate', 50000, 'decay rate')
 cmd:option('-backend', 'cudnn', 'nn|cudnn')
 cmd:option('-cnn_proto','/scratch/cluster/vsub/ssayed/cv/VGG_ILSVRC_16_layers_deploy.prototxt','path to CNN prototxt file in Caffe format')
 cmd:option('-cnn_model','/scratch/cluster/vsub/ssayed/cv/VGG_ILSVRC_16_layers.caffemodel','path to CNN model file containing the weights')
+cmd:option('-finetune_cnn', -1, 'should the cnn be finetuned? (-1=no, 0=yes)')
+cmd:option('-cnn_optim','sgdm','optimization to use for CNN')
+cmd:option('-cnn_optim_alpha',0.8,'alpha for momentum of CNN')
+cmd:option('-cnn_optim_beta',0.999,'alpha for momentum of CNN')
+cmd:option('-cnn_learning_rate',1e-5,'learning rate for the CNN')
+cmd:option('-cnn_weight_decay', 0, 'L2 weight decay just for the CNN')
 -- printing updates and saving checkpoints
 cmd:option('-lang_metric','METEOR','metric to use for saving checkpoints METEOR|CIDEr|ROUGE_L')
 cmd:option('-print_every',1,'how many steps/minibatches between printing out the loss')
@@ -57,7 +64,7 @@ torch.setdefaulttensortype('torch.FloatTensor') -- for CPU
 if opt.gpuid >= 0 then
   require 'cutorch'
   require 'cunn'
-  if opt.model == 'frames_cnn' and opt.backend == 'cudnn' then 
+  if opt.backend == 'cudnn' then 
   	require 'cudnn' 
   end
   cutorch.manualSeed(opt.seed)
@@ -68,29 +75,32 @@ end
 require (opt.model .. '.DataLoader')
 local loader = DataLoader(opt)
 utils.setVocab(loader:getVocab())
-local batchVideos, batchLabels, _, labelsPerVideo = loader:getBatch(1)
 
 -- create model 
 require (opt.model .. '.LanguageModel')
 opt.vocab_size = loader:getVocabSize()
 protos = {}
+-- protos.cnn = net_utils.build_cnn(opt)
+-- protos.expander = net_utils.build_cnn(opt)
 protos.lm = nn.LanguageModel(opt)
 protos.crit = nn.LanguageModelCriterion()
 
--- send model to gpu if necessary 
+-- send model parameters to gpu (converts it to cudaTensors)
 if opt.gpuid >= 0 then
   for k,v in pairs(protos) do v:cuda() end
 end
 
-local params, grad_params = protos.lm:getParameters()
-print('total number of parameters in model: ', params:nElement())
+-- local params, grad_params = protos.lm:getParameters()
+-- local cnn_params, cnn_grad_params = protos.cnn:getParameters()
+-- print('total number of parameters in model: ', params:nElement())
+-- print('total number of parameters in CNN: ', cnn_params:nElement())
 
-print('creating thin models for checkpointing...')
-local thin_lm = protos.lm:clone()
-thin_lm.core:share(protos.lm.core, 'weight', 'bias') 
-thin_lm.lookup_table:share(protos.lm.lookup_table, 'weight', 'bias')
-local lm_modules = thin_lm:getModulesList()
-for k,v in pairs(lm_modules) do net_utils.sanitize_gradients(v) end 
+-- print('creating thin models for checkpointing...')
+-- local thin_lm = protos.lm:clone()
+-- thin_lm.core:share(protos.lm.core, 'weight', 'bias') 
+-- thin_lm.lookup_table:share(protos.lm.lookup_table, 'weight', 'bias')
+-- local lm_modules = thin_lm:getModulesList()
+-- for k,v in pairs(lm_modules) do net_utils.sanitize_gradients(v) end 
 
 -- create clones for timesteps
 protos.lm:createClones()
@@ -106,11 +116,18 @@ local function sampleSplit(split_ix)
 
   local vidIds = {}
   for ix=1,numSamples do
-	  local video, _, id = loader:getBatch(split_ix)
+    -- get batch of data  
+    local rawFrames, _, id = loader:getBatch(3)
 
-	  if opt.gpuid >= 0 then video, _ = net_utils.send_to_gpu(opt.model, video) end
+    -- forward pass
+    local frameFeats = {}
+    for frameNum=1,#rawFrames do 
+      rawFrames[frameNum] = net_utils.cnn_prepro(rawFrames[frameNum], false, opt.gpuid)
+      local frameFeat = protos.cnn:forward(rawFrames[frameNum])
+      table.insert(frameFeats, frameFeat)
+    end
 
-    local sample, logprobs = protos.lm:sample(video, {sample_max=opt.sample_max, temperature=opt.temperature})
+    local sample, logprobs = protos.lm:sample(frameFeats, {sample_max=opt.sample_max, temperature=opt.temperature})
 
     table.insert(splitSamples, sample)
     table.insert(vidIds, id)
@@ -131,7 +148,7 @@ local function evalSplit(split_ix)
     -- fetch a batch of data
  		local batchVideos, batchLabels, _ = loader:getBatch(split_ix)
 
-		if opt.gpuid >= 0 then batchVideos, batchLabels = net_utils.send_to_gpu(opt.model, batchVideos, batchLabels) end
+		if opt.gpuid >= 0 then batchLabels = batchLabels:cuda() end
 
     -- forward the model to get loss
     local logprobs = protos.lm:forward{batchVideos, batchLabels}
@@ -149,17 +166,27 @@ local function lossFun()
   grad_params:zero()
 
   -- get batch of data  
-  local batchVideos, batchLabels, _, labelsPerVideo = loader:getBatch(1)
-  print(batchVideos)
-  if opt.gpuid >= 0 then batchVideos, batchLabels = net_utils.send_to_gpu(opt.model, batchVideos, batchLabels) end
+  local rawFrames, batchLabels, _ = loader:getBatch(1)
+  if opt.gpuid >= 0 then batchLabels = batchLabels:cuda() end
 
   -- forward pass
-  local logprobs = protos.lm:forward{batchVideos, batchLabels, labelsPerVideo}
+  local frameFeats = {}
+  local expandedFrameFeats = {}
+  for frameNum=1,#rawFrames do 
+    rawFrames[frameNum] = net_utils.cnn_prepro(rawFrames[frameNum], false, opt.gpuid)
+    local frameFeat = protos.cnn:forward(rawFrames[frameNum])
+    -- local frameFeat = cnnClones[frameNum]:forward(rawFrames[frameNum])
+    table.insert(frameFeats, frameFeat)
+    local expandedFrameFeat = protos.expander:forward(frameFeat)
+    table.insert(expandedFrameFeats, expandedFrameFeat)
+  end
+
+  local logprobs = protos.lm:forward{expandedFrameFeats, batchLabels}
   local loss = protos.crit:forward(logprobs, batchLabels)
 
   -- backward pass
   local dlogprobs = protos.crit:backward(logprobs, batchLabels)
-  local ddumpy = protos.lm:backward({batchVideos, batchVideos}, dlogprobs)
+  local dExpandedFrameFeats, ddumpy = unpack(protos.lm:backward({expandedFrameFeats, batchLabels}, dlogprobs))
 
   local gradNorm = grad_params:norm()
   if gradNorm > 5 then
@@ -167,19 +194,40 @@ local function lossFun()
     grad_params:div(gradNorm)
   end
 
+  if opt.finetune_cnn >= 0 then
+    for frameNum=#expandedFrameFeats, 1, -1 do
+      local dFrameFeat = protos.expander:backward(frameFeats[frameNum], dExpandedFrameFeats[frameNum])
+      local dRawFrames = protos.cnn:backward(rawFrames[frameNum], dFrameFeat)
+      -- local dRawFrames = cnnClones[frameNum]:backward(rawFrames[frameNum], dFrameFeat)
+    end
+
+    local gradNorm = cnn_grad_params:norm()
+    if gradNorm > 5 then
+      grad_params:mul(5)
+      grad_params:div(gradNorm)
+    end
+
+  end
+
   local losses = { total_loss = loss }
+
+  collectgarbage()
+
   return losses
 end
 
-local update = torch.Tensor(params:size()):zero()
-if opt.gpuid >= 0 then
-  update = update:float():cuda()
-end
+-- local update = torch.Tensor(params:size()):zero()
+-- local cnn_update = torch.Tensor(cnn_params:size()):zero()
+-- if opt.gpuid >= 0 then
+--   update = update:float():cuda()
+--   cnn_update = cnn_update:float():cuda()
+-- end
 
 local ix_to_word = loader:getVocab()
 local loss0
 local iter = 0
 local optim_state = {}
+local cnn_optim_state = {}
 local ntrain = loader:splitSize(1)
 local best_score = 0
 while true do
@@ -191,13 +239,15 @@ while true do
 
   -- decay learning rate 
   local learning_rate = opt.learning_rate
+  local cnn_learning_rate = opt.cnn_learning_rate
   if epoch > opt.decay_start and opt.decay_start >= 0 then
     local epochs_over_start = math.ceil(epoch - opt.decay_start)
     local decay_factor = math.pow(opt.decay_rate, epochs_over_start)
     learning_rate = learning_rate * decay_factor -- set the decayed rate
+    cnn_learning_rate = cnn_learning_rate * decay_factor
   end
 
-  update:zero()
+  -- update:zero()
   -- optimization step
   if opt.optim == 'rmsprop' then
     rmsprop(params, grad_params, learning_rate, opt.optim_alpha, opt.optim_epsilon, optim_state, update)
@@ -213,6 +263,19 @@ while true do
     adam(params, grad_params, learning_rate, opt.optim_alpha, opt.optim_beta, opt.optim_epsilon, optim_state)
   else
     error('bad option opt.optim')
+  end
+
+  -- cnn_update:zero()
+  if opt.finetune_cnn >= 0 then
+    if opt.cnn_optim == 'sgd' then
+      sgd(cnn_params, cnn_grad_params, cnn_learning_rate)
+    elseif opt.cnn_optim == 'sgdm' then
+      sgdm(cnn_params, cnn_grad_params, cnn_learning_rate, opt.cnn_optim_alpha, cnn_optim_state, cnn_update)
+    elseif opt.cnn_optim == 'adam' then
+      adam(cnn_params, cnn_grad_params, cnn_learning_rate, opt.cnn_optim_alpha, opt.cnn_optim_beta, opt.optim_epsilon, cnn_optim_state)
+    else
+      error('bad option for opt.cnn_optim')
+    end
   end
 
   -- save checkpoint based on language evaluation
@@ -245,7 +308,7 @@ while true do
   end
 
   if iter % opt.print_every == 0 then
-    print(string.format("%d (epoch %.3f), train_loss = %6.8f, ratio = %6.4e", iter, epoch, losses.total_loss, update:norm()/params:norm()))
+    print(string.format("%d (epoch %.3f), train_loss = %6.8f", iter, epoch, losses.total_loss))
   end
 
   if epoch > opt.epochs and opt.epochs > 0 then
