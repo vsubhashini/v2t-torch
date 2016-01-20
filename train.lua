@@ -146,9 +146,8 @@ local function evalSplit(split_ix)
   for i=1,numEvals do
 
     -- fetch a batch of data
-        local batchVideos, batchLabels, _ = loader:getBatch(split_ix)
-
-        if opt.gpuid >= 0 then batchLabels = batchLabels:cuda() end
+    local batchVideos, batchLabels, _ = loader:getBatch(split_ix)
+    if opt.gpuid >= 0 then batchLabels = batchLabels:cuda() end
 
     -- forward the model to get loss
     local logprobs = protos.lm:forward{batchVideos, batchLabels}
