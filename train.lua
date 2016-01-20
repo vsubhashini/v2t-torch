@@ -65,7 +65,7 @@ if opt.gpuid >= 0 then
   require 'cutorch'
   require 'cunn'
   if opt.backend == 'cudnn' then 
-  	require 'cudnn' 
+    require 'cudnn' 
   end
   cutorch.manualSeed(opt.seed)
   cutorch.setDevice(opt.gpuid + 1) -- note +1 because lua is 1-indexed
@@ -146,9 +146,9 @@ local function evalSplit(split_ix)
   for i=1,numEvals do
 
     -- fetch a batch of data
- 		local batchVideos, batchLabels, _ = loader:getBatch(split_ix)
+        local batchVideos, batchLabels, _ = loader:getBatch(split_ix)
 
-		if opt.gpuid >= 0 then batchLabels = batchLabels:cuda() end
+        if opt.gpuid >= 0 then batchLabels = batchLabels:cuda() end
 
     -- forward the model to get loss
     local logprobs = protos.lm:forward{batchVideos, batchLabels}
