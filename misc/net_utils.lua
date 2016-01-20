@@ -10,7 +10,7 @@ function net_utils.build_cnn(opt)
 
   local layer_num = utils.getopt(opt, 'layer_num', 38) -- 29
   local backend = utils.getopt(opt, 'backend', 'cudnn')
-  
+
   if backend == 'cudnn' then
     require 'cudnn'
     backend = cudnn

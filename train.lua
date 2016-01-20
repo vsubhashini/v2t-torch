@@ -75,13 +75,12 @@ end
 require (opt.model .. '.DataLoader')
 local loader = DataLoader(opt)
 utils.setVocab(loader:getVocab())
-
 -- create model 
 require (opt.model .. '.LanguageModel')
 opt.vocab_size = loader:getVocabSize()
 protos = {}
--- protos.cnn = net_utils.build_cnn(opt)
--- protos.expander = net_utils.build_cnn(opt)
+protos.cnn = net_utils.build_cnn(opt)
+protos.expander = nn.FeatExpander(opt.labels_per_vid)
 protos.lm = nn.LanguageModel(opt)
 protos.crit = nn.LanguageModelCriterion()
 
@@ -90,10 +89,10 @@ if opt.gpuid >= 0 then
   for k,v in pairs(protos) do v:cuda() end
 end
 
--- local params, grad_params = protos.lm:getParameters()
--- local cnn_params, cnn_grad_params = protos.cnn:getParameters()
--- print('total number of parameters in model: ', params:nElement())
--- print('total number of parameters in CNN: ', cnn_params:nElement())
+local params, grad_params = protos.lm:getParameters()
+local cnn_params, cnn_grad_params = protos.cnn:getParameters()
+print('total number of parameters in model: ', params:nElement())
+print('total number of parameters in CNN: ', cnn_params:nElement())
 
 -- print('creating thin models for checkpointing...')
 -- local thin_lm = protos.lm:clone()
@@ -103,6 +102,11 @@ end
 -- for k,v in pairs(lm_modules) do net_utils.sanitize_gradients(v) end 
 
 -- create clones for timesteps
+cnnClones = {protos.cnn}
+for t=2,opt.max_seqlen do
+  cnnClones[t] = protos.cnn:clone('weight', 'bias', 'gradWeight', 'gradBias')
+end
+
 protos.lm:createClones()
 
 collectgarbage()
@@ -169,13 +173,15 @@ local function lossFun()
   if opt.gpuid >= 0 then batchLabels = batchLabels:cuda() end
 
   -- forward pass
-  local frameFeats = {}
+  -- local frameFeats = {}
   local expandedFrameFeats = {}
   for frameNum=1,#rawFrames do 
+    print(frameNum)
     rawFrames[frameNum] = net_utils.cnn_prepro(rawFrames[frameNum], false, opt.gpuid)
-    local frameFeat = protos.cnn:forward(rawFrames[frameNum])
+    -- local frameFeat = protos.cnn:forward(rawFrames[frameNum])
+    local frameFeat = cnnClones[frameNum]:forward(rawFrames[frameNum])
     -- local frameFeat = cnnClones[frameNum]:forward(rawFrames[frameNum])
-    table.insert(frameFeats, frameFeat)
+    -- table.insert(frameFeats, frameFeat)
     local expandedFrameFeat = protos.expander:forward(frameFeat)
     table.insert(expandedFrameFeats, expandedFrameFeat)
   end
@@ -196,7 +202,7 @@ local function lossFun()
   if opt.finetune_cnn >= 0 then
     for frameNum=#expandedFrameFeats, 1, -1 do
       local dFrameFeat = protos.expander:backward(frameFeats[frameNum], dExpandedFrameFeats[frameNum])
-      local dRawFrames = protos.cnn:backward(rawFrames[frameNum], dFrameFeat)
+      local dRawFrames = cnnClones[frameNum]:backward(rawFrames[frameNum], dFrameFeat)
       -- local dRawFrames = cnnClones[frameNum]:backward(rawFrames[frameNum], dFrameFeat)
     end
 
