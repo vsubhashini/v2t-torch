@@ -3,7 +3,7 @@ local net_utils = {}
 
 function net_utils.build_cnn(opt)
   require 'loadcaffe'
-
+  opt.backend = 'nn'
   local cnn_backend = opt.backend
   if opt.gpuid == -1 then cnn_backend = 'nn' end -- override to nn if gpu is disabled
   local cnn = loadcaffe.load(opt.cnn_proto, opt.cnn_model, cnn_backend)

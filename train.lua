@@ -176,7 +176,6 @@ local function lossFun()
   -- local frameFeats = {}
   local expandedFrameFeats = {}
   for frameNum=1,#rawFrames do 
-    print(frameNum)
     rawFrames[frameNum] = net_utils.cnn_prepro(rawFrames[frameNum], false, opt.gpuid)
     -- local frameFeat = protos.cnn:forward(rawFrames[frameNum])
     local frameFeat = cnnClones[frameNum]:forward(rawFrames[frameNum])
