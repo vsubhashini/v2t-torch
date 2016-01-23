@@ -47,15 +47,6 @@ function DataLoader:__init(opt)
     until numTrainLabels % self.batchSize == 0
   end
 
-  -- self.splits = {'train', 'val', 'valEval'}
-  -- self.splitSizes = {numTrainLabels, numValLabels, numValVideos}
-  -- self.rand = {}
-  -- for i=1,#self.splitSizes do table.insert(self.rand, torch.randperm(self.splitSizes[i])) end
-  -- self.splitSizes[1] = self.splitSizes[1]/self.batchSize
-  -- self.data_files = {self.h5_train, self.h5_val}
-  -- self.iter = {0, 0, 0}
-  -- self.evalDict = {} 
-
   self.splits = {'train', 'val'}
   local numTrainVideos = self.h5_train:read('/videos'):dataspaceSize()[1]
   local numValVideos = self.h5_val:read('/videos'):dataspaceSize()[1]
@@ -63,7 +54,6 @@ function DataLoader:__init(opt)
 
   self.data_files = {self.h5_train, self.h5_val}
   self.iter = {0, 0, 0}
-  self.evalDict = {} 
 
   self.labelsPerVideo = {}
   self.vidCapIter = {}
@@ -87,58 +77,6 @@ function DataLoader:__init(opt)
     self.splitSizes[i] = self.splitSizes[i]/self.batchSize
   end
 end
-
--- function DataLoader:getBatch(split_ix)
-
---   if split_ix == 3 then 
---     video, id = self:getEvalBatch()
---     return video, nil, id
---   end
-
---   local batchSize
---   if split_ix == 1 then batchSize = self.batchSize else batchSize = 1 end
-
---   -- find max vid size 
---   local longestVid = 0
---   local longestCap = 0
---   for i=1,batchSize do -- find longest caption and video in batch
---     local rawSplitId = self.rand[split_ix][self.iter[split_ix]*batchSize + i]
---     local capSize = self.data_files[split_ix]:read('/label_length'):partial({rawSplitId, rawSplitId})[1]
---     if capSize > longestCap then longestCap = capSize end
-
---     local vidId = self.data_files[split_ix]:read('/label_to_id'):partial({rawSplitId, rawSplitId})[1]
---     local vidSize = self.data_files[split_ix]:read('/video_length'):partial({vidId, vidId})[1]
---     if vidSize > longestVid then longestVid = vidSize end
---   end
-
---   local batchVideos = {}
---   if longestVid + longestCap > self.max_seqlen then longestVid = self.max_seqlen - longestCap end
---   for i=1,longestVid do table.insert(batchVideos, torch.ByteTensor(batchSize, 3, 256, 256)) end
-
---   for i=1,batchSize do
---     local rawSplitId = self.rand[split_ix][self.iter[split_ix]*batchSize + i]
---     local vidId = self.data_files[split_ix]:read('/label_to_id'):partial({rawSplitId, rawSplitId})[1]
-
---     local vidlen = self.data_files[split_ix]:read('/video_length'):partial({vidId, vidId})[1]
---     if vidlen > longestVid then vidlen = longestVid end
---     for frameNum=1,vidlen do
---       local frame = self.data_files[split_ix]:read('/videos'):partial({vidId, vidId}, {frameNum,frameNum}, {1,3}, {1,256}, {1,256})
---       frame = frame:select(1,1):select(1,1)
---       batchVideos[frameNum]:select(1, i):copy(frame)
---     end
---   end
-
---   local batchLabels = torch.LongTensor(longestCap, batchSize):zero()
---   for i=1,batchSize do
---     local rawSplitId = self.rand[split_ix][self.iter[split_ix]*batchSize + i]
---     local caplen = self.data_files[split_ix]:read('/label_length'):partial({rawSplitId, rawSplitId})[1]
---     local cap = self.data_files[split_ix]:read('/labels'):partial({rawSplitId, rawSplitId}, {1, caplen}):select(1,1)
---     batchLabels:select(2,i):sub(1,cap:nElement()):copy(cap)
---   end
---   self.iter[split_ix] = self.iter[split_ix] + 1
-
---   return batchVideos, batchLabels
--- end
 
 function DataLoader:getBatch(split_ix)
 
@@ -212,18 +150,6 @@ function DataLoader:getBatch(split_ix)
 end
 
 function DataLoader:getEvalBatch()
-  -- local stop = false
-  -- local vidId
-  -- repeat 
-  --   local rawSplitId = self.rand[2][self.iter[3] + 1]
-  --   vidId = self.data_files[2]:read('/label_to_id'):partial({rawSplitId, rawSplitId})[1]
-  --   if self.evalDict[vidId] == nil then
-  --     self.evalDict[vidId] = true
-  --     stop = true
-  --   end
-
-  --   self.iter[3] = self.iter[3] + 1
-  -- until stop
   self.iter[3] = self.iter[3] + 1
   local vidId = self.iter[3]
 
@@ -254,7 +180,6 @@ end
 
 function DataLoader:resetIterator(split_ix)
   self.iter[split_ix] = 0
-  if split_ix == 3 then self.evalDict = {} end
 end
 
 function DataLoader:preprocess(video_dir, label_dir, vocab_file, save_dir, max_seqlen)

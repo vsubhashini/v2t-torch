@@ -115,7 +115,7 @@ function layer:sample(input, opt)
     elseif t == vid_length+1 then
       -- feed in the start tokens
       it = torch.LongTensor(batch_size):fill(self.vocab_size+1) -- Nx1 vector of START tokens 
-      xt = self.lookup_tables[t]:forward(it) -- NxK sized input (token embedding vectors)
+      xt = self.lookup_table:forward(it) -- NxK sized input (token embedding vectors)
     else -- take predictions from previous timestep
       if sample_max == 1 then
         -- use argmax "sampling"

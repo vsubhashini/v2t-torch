@@ -39,19 +39,13 @@ cmd:option('-decay_rate', 50000, 'decay rate')
 cmd:option('-backend', 'cudnn', 'nn|cudnn')
 cmd:option('-cnn_proto','/scratch/cluster/vsub/ssayed/cv/VGG_ILSVRC_16_layers_deploy.prototxt','path to CNN prototxt file in Caffe format')
 cmd:option('-cnn_model','/scratch/cluster/vsub/ssayed/cv/VGG_ILSVRC_16_layers.caffemodel','path to CNN model file containing the weights')
-cmd:option('-finetune_cnn', -1, 'should the cnn be finetuned? (-1=no, 0=yes)')
-cmd:option('-cnn_optim','sgdm','optimization to use for CNN')
-cmd:option('-cnn_optim_alpha',0.8,'alpha for momentum of CNN')
-cmd:option('-cnn_optim_beta',0.999,'alpha for momentum of CNN')
-cmd:option('-cnn_learning_rate',1e-5,'learning rate for the CNN')
-cmd:option('-cnn_weight_decay', 0, 'L2 weight decay just for the CNN')
 -- printing updates and saving checkpoints
 cmd:option('-lang_metric','METEOR','metric to use for saving checkpoints METEOR|CIDEr|ROUGE_L')
 cmd:option('-print_every',1,'how many steps/minibatches between printing out the loss')
 cmd:option('-eval_model_every', 200, 'how many steps/minibatches between loss and language evaluation on model')
 cmd:option('-eval_val_loss', 0, 'evaluate and save validation loss during checkpoints (1 == yes, 0 == no)')
-cmd:option('-save_model_dir', 'cv/','directory to save checkpoints and score/loss evaluations')
-cmd:option('-save_model_name', 'frames_1','name of model')
+cmd:option('-save_model_dir', '/scratch/cluster/vsub/ssayed/cv/models/','directory to save checkpoints and score/loss evaluations')
+cmd:option('-save_model_name', 'cnn_rms','name of model')
 -- misc
 cmd:option('-seed', 123, 'random number generator seed to use')
 cmd:option('-gpuid', -1, 'which gpu to use. -1 = use CPU')
@@ -75,6 +69,7 @@ end
 require (opt.model .. '.DataLoader')
 local loader = DataLoader(opt)
 utils.setVocab(loader:getVocab())
+
 -- create model 
 require (opt.model .. '.LanguageModel')
 opt.vocab_size = loader:getVocabSize()
@@ -94,18 +89,12 @@ local cnn_params, cnn_grad_params = protos.cnn:getParameters()
 print('total number of parameters in model: ', params:nElement())
 print('total number of parameters in CNN: ', cnn_params:nElement())
 
--- print('creating thin models for checkpointing...')
--- local thin_lm = protos.lm:clone()
--- thin_lm.core:share(protos.lm.core, 'weight', 'bias') 
--- thin_lm.lookup_table:share(protos.lm.lookup_table, 'weight', 'bias')
--- local lm_modules = thin_lm:getModulesList()
--- for k,v in pairs(lm_modules) do net_utils.sanitize_gradients(v) end 
-
--- create clones for timesteps
-cnnClones = {protos.cnn}
-for t=2,opt.max_seqlen do
-  cnnClones[t] = protos.cnn:clone('weight', 'bias', 'gradWeight', 'gradBias')
-end
+print('creating thin models for checkpointing...')
+local thin_lm = protos.lm:clone()
+thin_lm.core:share(protos.lm.core, 'weight', 'bias') 
+thin_lm.lookup_table:share(protos.lm.lookup_table, 'weight', 'bias')
+local lm_modules = thin_lm:getModulesList()
+for k,v in pairs(lm_modules) do net_utils.sanitize_gradients(v) end 
 
 protos.lm:createClones()
 
@@ -173,14 +162,10 @@ local function lossFun()
   if opt.gpuid >= 0 then batchLabels = batchLabels:cuda() end
 
   -- forward pass
-  -- local frameFeats = {}
   local expandedFrameFeats = {}
   for frameNum=1,#rawFrames do 
     rawFrames[frameNum] = net_utils.cnn_prepro(rawFrames[frameNum], false, opt.gpuid)
-    -- local frameFeat = protos.cnn:forward(rawFrames[frameNum])
-    local frameFeat = cnnClones[frameNum]:forward(rawFrames[frameNum])
-    -- local frameFeat = cnnClones[frameNum]:forward(rawFrames[frameNum])
-    -- table.insert(frameFeats, frameFeat)
+    local frameFeat = protos.cnn:forward(rawFrames[frameNum])
     local expandedFrameFeat = protos.expander:forward(frameFeat)
     table.insert(expandedFrameFeats, expandedFrameFeat)
   end
@@ -198,34 +183,12 @@ local function lossFun()
     grad_params:div(gradNorm)
   end
 
-  if opt.finetune_cnn >= 0 then
-    for frameNum=#expandedFrameFeats, 1, -1 do
-      local dFrameFeat = protos.expander:backward(frameFeats[frameNum], dExpandedFrameFeats[frameNum])
-      local dRawFrames = cnnClones[frameNum]:backward(rawFrames[frameNum], dFrameFeat)
-      -- local dRawFrames = cnnClones[frameNum]:backward(rawFrames[frameNum], dFrameFeat)
-    end
-
-    local gradNorm = cnn_grad_params:norm()
-    if gradNorm > 5 then
-      grad_params:mul(5)
-      grad_params:div(gradNorm)
-    end
-
-  end
-
   local losses = { total_loss = loss }
 
   collectgarbage()
 
   return losses
 end
-
--- local update = torch.Tensor(params:size()):zero()
--- local cnn_update = torch.Tensor(cnn_params:size()):zero()
--- if opt.gpuid >= 0 then
---   update = update:float():cuda()
---   cnn_update = cnn_update:float():cuda()
--- end
 
 local ix_to_word = loader:getVocab()
 local loss0
@@ -243,15 +206,12 @@ while true do
 
   -- decay learning rate 
   local learning_rate = opt.learning_rate
-  local cnn_learning_rate = opt.cnn_learning_rate
   if epoch > opt.decay_start and opt.decay_start >= 0 then
     local epochs_over_start = math.ceil(epoch - opt.decay_start)
     local decay_factor = math.pow(opt.decay_rate, epochs_over_start)
     learning_rate = learning_rate * decay_factor -- set the decayed rate
-    cnn_learning_rate = cnn_learning_rate * decay_factor
   end
 
-  -- update:zero()
   -- optimization step
   if opt.optim == 'rmsprop' then
     rmsprop(params, grad_params, learning_rate, opt.optim_alpha, opt.optim_epsilon, optim_state, update)
@@ -267,19 +227,6 @@ while true do
     adam(params, grad_params, learning_rate, opt.optim_alpha, opt.optim_beta, opt.optim_epsilon, optim_state)
   else
     error('bad option opt.optim')
-  end
-
-  -- cnn_update:zero()
-  if opt.finetune_cnn >= 0 then
-    if opt.cnn_optim == 'sgd' then
-      sgd(cnn_params, cnn_grad_params, cnn_learning_rate)
-    elseif opt.cnn_optim == 'sgdm' then
-      sgdm(cnn_params, cnn_grad_params, cnn_learning_rate, opt.cnn_optim_alpha, cnn_optim_state, cnn_update)
-    elseif opt.cnn_optim == 'adam' then
-      adam(cnn_params, cnn_grad_params, cnn_learning_rate, opt.cnn_optim_alpha, opt.cnn_optim_beta, opt.optim_epsilon, cnn_optim_state)
-    else
-      error('bad option for opt.cnn_optim')
-    end
   end
 
   -- save checkpoint based on language evaluation
