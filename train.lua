@@ -39,6 +39,10 @@ cmd:option('-decay_rate', 50000, 'decay rate')
 cmd:option('-backend', 'cudnn', 'nn|cudnn')
 cmd:option('-cnn_proto','/scratch/cluster/vsub/ssayed/cv/VGG_ILSVRC_16_layers_deploy.prototxt','path to CNN prototxt file in Caffe format')
 cmd:option('-cnn_model','/scratch/cluster/vsub/ssayed/cv/VGG_ILSVRC_16_layers.caffemodel','path to CNN model file containing the weights')
+-- att options
+cmd:option('size', 3, 'filter size')
+cmd:option('padding', 0, 'size of padding')
+cmd:option('stride', 2, 'size of filter strides')
 -- printing updates and saving checkpoints
 cmd:option('-lang_metric','METEOR','metric to use for saving checkpoints METEOR|CIDEr|ROUGE_L')
 cmd:option('-print_every',1,'how many steps/minibatches between printing out the loss')
@@ -72,12 +76,21 @@ utils.setVocab(loader:getVocab())
 
 -- create model 
 require (opt.model .. '.LanguageModel')
+require 'frames_cnn.AttentionModel'
+
 opt.vocab_size = loader:getVocabSize()
 protos = {}
 protos.cnn = net_utils.build_cnn(opt)
-protos.expander = nn.FeatExpander(opt.labels_per_vid)
-protos.lm = nn.LanguageModel(opt)
-protos.crit = nn.LanguageModelCriterion()
+protos.ce = nn.AnnotationExtractor(opt.size, opt.stride, opt.padding)
+
+vid, _, _ = loader:getBatch(1)
+vid[1] = net_utils.cnn_prepro(vid[1], false, opt.gpuid)
+local f = protos.cnn:forward(vid[1])
+protos.ce:forward(f)
+
+-- protos.expander = nn.FeatExpander(opt.labels_per_vid)
+-- protos.lm = nn.LanguageModel(opt)
+-- protos.crit = nn.LanguageModelCriterion()
 
 -- send model parameters to gpu (converts it to cudaTensors)
 if opt.gpuid >= 0 then

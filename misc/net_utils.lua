@@ -8,7 +8,7 @@ function net_utils.build_cnn(opt)
   if opt.gpuid == -1 then cnn_backend = 'nn' end -- override to nn if gpu is disabled
   local cnn = loadcaffe.load(opt.cnn_proto, opt.cnn_model, cnn_backend)
 
-  local layer_num = utils.getopt(opt, 'layer_num', 38) -- 29
+  local layer_num = utils.getopt(opt, 'layer_num', 31) -- 29
   local backend = utils.getopt(opt, 'backend', 'cudnn')
 
   if backend == 'cudnn' then
