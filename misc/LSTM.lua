@@ -35,6 +35,7 @@ function LSTM.lstm(input_size, output_size, rnn_size, n, dropout)
 
     local reshaped = nn.Reshape(4, rnn_size)(all_input_sums)
     local n1, n2, n3, n4 = nn.SplitTable(2)(reshaped):split(4)
+
     -- decode the gates
     local in_gate = nn.Sigmoid()(n1)
     local forget_gate = nn.Sigmoid()(n2)
@@ -42,6 +43,8 @@ function LSTM.lstm(input_size, output_size, rnn_size, n, dropout)
     -- decode the write inputs
     local in_transform = nn.Tanh()(n4)
     -- perform the LSTM update
+    table.insert(outputs, forget_gate)
+    table.insert(outputs, prev_c)
     local next_c           = nn.CAddTable()({
         nn.CMulTable()({forget_gate, prev_c}),
         nn.CMulTable()({in_gate,     in_transform})

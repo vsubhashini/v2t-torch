@@ -78,6 +78,12 @@ utils.setVocab(loader:getVocab())
 require (opt.model .. '.LanguageModel')
 require 'frames_cnn.AttentionModel'
 
+-- local LSTM = require 'misc.LSTM'
+-- lstm = LSTM.lstm(5, 5, 3, 1, 0)
+-- o = lstm:forward{torch.Tensor(1, 5), torch.Tensor(1, 3), torch.Tensor(1, 3)}
+-- print(o)
+-- print(nil+2)
+
 opt.vocab_size = loader:getVocabSize()
 protos = {}
 protos.cnn = net_utils.build_cnn(opt)
@@ -86,8 +92,14 @@ protos.ce = nn.AnnotationExtractor(opt.size, opt.stride, opt.padding)
 vid, _, _ = loader:getBatch(1)
 vid[1] = net_utils.cnn_prepro(vid[1], false, opt.gpuid)
 local f = protos.cnn:forward(vid[1])
-protos.ce:forward(f)
+output = protos.ce:forward(f)
 
+print(opt.batch_size)
+opt.num_annotations = output:size(2)
+opt.annotation_size = output:size(3)
+
+protos.am = nn.AttentionModel(opt)
+protos.am:forward(output)
 -- protos.expander = nn.FeatExpander(opt.labels_per_vid)
 -- protos.lm = nn.LanguageModel(opt)
 -- protos.crit = nn.LanguageModelCriterion()
