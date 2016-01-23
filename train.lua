@@ -39,8 +39,8 @@ cmd:option('-lang_metric','METEOR','metric to use for saving checkpoints METEOR|
 cmd:option('-print_every',1,'how many steps/minibatches between printing out the loss')
 cmd:option('-eval_model_every', 200, 'how many steps/minibatches between loss and language evaluation on model')
 cmd:option('-eval_val_loss', 0, 'evaluate and save validation loss during checkpoints (1 == yes, 0 == no)')
-cmd:option('-save_model_dir', 'cv/','directory to save checkpoints and score/loss evaluations')
-cmd:option('-save_model_name', 'frames_1','name of model')
+cmd:option('-save_model_dir', '/scratch/cluster/vsub/ssayed/cv/','directory to save checkpoints and score/loss evaluations')
+cmd:option('-save_model_name', 'mp_new','name of model')
 -- misc
 cmd:option('-seed', 123, 'random number generator seed to use')
 cmd:option('-gpuid', -1, 'which gpu to use. -1 = use CPU')
