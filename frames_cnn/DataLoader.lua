@@ -131,12 +131,13 @@ function DataLoader:getBatch(split_ix)
       batchCapId = batchCapId + 1
       local capix = capStartIx + self.vidCapIter[split_ix][vidId] - 1
       if capix > capStartIx + self.labelsPerVideo[split_ix][vidId] - 1 then
-        capix = capStartIx
         self.vidCapIter[split_ix][vidId] = 1
+        capix = capStartIx + self.vidCapIter[split_ix][vidId] - 1
       end
       local caplen = self.data_files[split_ix]:read('/label_length'):partial({capix,capix})[1]
       local cap = self.data_files[split_ix]:read('/labels'):partial({capix,capix}, {1,caplen}):select(1,1)
       batchLabels:select(2,batchCapId):sub(1,cap:nElement()):copy(cap)
+      
       self.vidCapIter[split_ix][vidId] = self.vidCapIter[split_ix][vidId] + 1
     end
   end
