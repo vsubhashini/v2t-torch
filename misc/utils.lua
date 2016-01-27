@@ -29,8 +29,7 @@ end
 --[[
 performs language evaluation by running coco python code. 
 ]]
-function utils.lang_eval(samples, vid_ids)
-  local filename = 'valSample'
+function utils.lang_eval(samples, vid_ids, filename)
   local file = io.open('coco_evaluation/' .. filename .. '.txt', 'w')
   -- convert split samples to sentences
   local split_samples = ''

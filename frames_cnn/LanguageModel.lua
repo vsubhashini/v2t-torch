@@ -155,6 +155,7 @@ function layer:updateOutput(input)
   if self.clones == nil then self:createClones() end -- lazily create clones on first forward pass
 
   self.vid_length = #vid
+  if self.vid_length > 40 then self.vid_length = 40 end
   local cap_length = output_seq:size(1)
   local batch_size = output_seq:size(2)
   local nsteps = self.vid_length + cap_length -- vid_length + 1 (START) + size(word_sequence) - 1 (exclude END Token)
@@ -273,7 +274,7 @@ function crit:updateOutput(input, seq)
     end
   end
   self.output = loss / n -- normalize by number of predictions that were made
-  self.gradInput:div(batch_size)
+  self.gradInput:div(n)
   return self.output
 end
 

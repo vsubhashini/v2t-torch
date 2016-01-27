@@ -27,6 +27,7 @@ cmd:option('-max_seqlen', 80, 'maximum sequence length during training. seqlen =
 cmd:option('-batch_size', 5, 'size of mini-batch')
 cmd:option('-labels_per_vid', 5, '..')
 cmd:option('-epochs', -1, 'max number of epochs to run for (-1 = run forever)')
+cmd:option('-grad_clip',0.1,'clip gradients at this value (note should be lower than usual 5 because we normalize grads by both batch and seq_length)')
 -- optimization learning
 cmd:option('-optim','rmsprop', 'what update to use? rmsprop|sgd|sgdmom|adagrad|adam')
 cmd:option('-learning_rate', 4e-4,'learning rate')
@@ -97,7 +98,6 @@ local lm_modules = thin_lm:getModulesList()
 for k,v in pairs(lm_modules) do net_utils.sanitize_gradients(v) end 
 
 protos.lm:createClones()
-
 collectgarbage()
 
 local function sampleSplit(split_ix)
@@ -110,7 +110,7 @@ local function sampleSplit(split_ix)
   local vidIds = {}
   for ix=1,numSamples do
     -- get batch of data  
-    local rawFrames, _, id = loader:getBatch(3)
+    local rawFrames, _, id = loader:getBatch(split_ix)
 
     -- forward pass
     local frameFeats = {}
@@ -130,6 +130,7 @@ local function sampleSplit(split_ix)
 end
 
 local function evalSplit(split_ix)
+  print('evaluating loss on split ' .. split_ix)
   protos.lm:evaluate()
   loader:resetIterator(split_ix) 
 
@@ -139,15 +140,26 @@ local function evalSplit(split_ix)
   for i=1,numEvals do
 
     -- fetch a batch of data
-    local batchVideos, batchLabels, _ = loader:getBatch(split_ix)
-    if opt.gpuid >= 0 then batchLabels = batchLabels:cuda() end
+    local rawFrames, labels, _ = loader:getBatch(split_ix)
+    if opt.gpuid >= 0 then labels = labels:cuda() end
+
+    local expandedFrameFeats = {}
+    local expander = nn.FeatExpander(labels:size(2))
+    if opt.gpuid >= 0 then expander = expander:cuda() end
+
+    for frameNum=1,#rawFrames do
+      rawFrames[frameNum] = net_utils.cnn_prepro(rawFrames[frameNum], false, opt.gpuid)
+      local frameFeat = protos.cnn:forward(rawFrames[frameNum])
+      local expandedFrameFeat = expander:forward(frameFeat)
+      table.insert(expandedFrameFeats, expandedFrameFeat)
+    end
 
     -- forward the model to get loss
-    local logprobs = protos.lm:forward{batchVideos, batchLabels}
-    local loss = protos.crit:forward(logprobs, batchLabels)
+    local logprobs = protos.lm:forward{expandedFrameFeats, labels}
+    local loss = protos.crit:forward(logprobs, labels)
     totalLoss = totalLoss + loss
 
-    print(i .. '/' .. numEvals .. '... ' .. loss)
+    print(i .. '/' .. numEvals .. ' ... ' .. loss)
   end
 
   return totalLoss/numEvals
@@ -177,11 +189,12 @@ local function lossFun()
   local dlogprobs = protos.crit:backward(logprobs, batchLabels)
   local dExpandedFrameFeats, ddumpy = unpack(protos.lm:backward({expandedFrameFeats, batchLabels}, dlogprobs))
 
-  local gradNorm = grad_params:norm()
-  if gradNorm > 5 then
-    grad_params:mul(5)
-    grad_params:div(gradNorm)
-  end
+  -- local gradNorm = grad_params:norm()
+  -- if gradNorm > 5 then
+  --   grad_params:mul(5)
+  --   grad_params:div(gradNorm)
+  -- end
+  grad_params:clamp(-opt.grad_clip, opt.grad_clip)
 
   local losses = { total_loss = loss }
 
@@ -201,7 +214,8 @@ while true do
   iter = iter + 1
 
   -- eval loss/gradient 
-  local epoch = iter / ntrain
+  -- local epoch = iter / ntrain
+  local epoch = loader:getEpoch(1)
   local losses = lossFun()
 
   -- decay learning rate 
@@ -231,11 +245,12 @@ while true do
 
   -- save checkpoint based on language evaluation
   if (iter % opt.eval_model_every == 0 or (epoch >= opt.epochs and opt.epochs > 0)) then
-
+    -- local loss = evalSplit(2)
+    -- print(iter .. ' ' .. loss)
     local loss
     if opt.eval_val_loss > 0 then loss = evalSplit(2) end
-    local splitSamples, ids = sampleSplit(3)
-    scores, samples = utils.lang_eval(splitSamples, ids)
+    local splitSamples, ids = sampleSplit(2)
+    scores, samples = utils.lang_eval(splitSamples, ids, opt.save_model_name)
 
     -- save the model if it performs better than ever
     if scores[opt.lang_metric] > best_score then
